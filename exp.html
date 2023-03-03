@@ -1,0 +1,204 @@
+<html>
+<head>
+    <title>geoforce expr</title>
+</head>
+<body style="margin: 0; background: #3a3a3a;">
+    <img src="src/esri_gray_canvas.png" width="1600" alt=""/>
+    <svg style="position: absolute; z-index: 10; left: 0; top: 0;"></svg>
+</body>
+
+<script src="https://cdn.jsdelivr.net/npm/d3-selection@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-dispatch@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-quadtree@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-timer@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-force@3"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.1.0/papaparse.min.js"></script>
+<script>
+const width = 1600;
+const height= 800;
+// const sim_data = 'DR_sim20';
+// const aux_data = 'experts_loc';
+const sim_data = 'sim_uw0.45_ub0.3_s0.1';
+const aux_data = 'international_placenames2';
+
+var data;
+fetch(`data/dataset2/${aux_data}.json`).then($ => $.json()).then(d => {
+    loadGraph(d);
+});
+
+const _K = 3;
+const _k = 8;
+const _a = _K > 100 ? 100 / _K : 1
+const thres = .6;
+const thres1 = thres;
+const thres2 = thres;
+const loadGraph = function(data) {
+    var locinfo = {};
+    for (var i in data)
+        locinfo[data[i].name] = {
+            lat: parseFloat(data[i].lat),
+            long: parseFloat(data[i].long),
+            city: data[i].city || data[i].name,
+            name: data[i].name,
+        };
+
+    fetch(`data/dataset2/${sim_data}.csv`).then($ => $.text()).then(d => {
+        var lines = Papa.parse(d).data;
+        var nodes = lines[0];
+
+        var jnodes = [];
+        for (var i = 0; i < nodes.length; i++) {
+            var e = 0;
+            for (var j = 0; j < nodes.length; j++) {
+                var th = nodes[i].substr(0, 2) == nodes[j].substr(0, 2) ? thres1 : thres2;
+                e += (i != j && parseFloat(lines[i + 1][j]) > th ? 1 : 0);
+            }
+            var key = nodes[i] //.split('/').reverse()[0];
+            try {
+                jnodes.push({
+                    'id': i.toString(),
+                    'text': locinfo[key].name, //key.replace(/_/g, ' '),
+                    'name': locinfo[key].city,
+                    'val': e / 10,
+                    'lat': locinfo[key].lat,
+                    'lng': locinfo[key].long,
+                });
+            } catch (e) {
+                console.log(key)
+            }
+            
+        }
+
+        var jedges = [];
+        for (var i = 0; i < nodes.length; i++) {
+            for (var j = i + 1; j < nodes.length; j++) {
+                var th = nodes[i].substr(0, 2) == nodes[j].substr(0, 2) ? thres1 : thres2;
+                var val = parseFloat(lines[i + 1][j]);
+                if (val > th) {
+                    jedges.push({
+                        'source': i.toString(),
+                        'target': j.toString(),
+                        'val': val
+                    });
+                }
+            }
+        }
+
+        const ow = width / 2; 
+        const oh = height / 2;
+        const _proj = (lng, lat) => [ow * (.9 + lng / 180), oh * (1 - lat / 90)];
+        const simulation = d3.forceSimulation(jnodes)
+            .alpha(_a)
+            .force("link", d3.forceLink(jedges).id(d => d.id)
+                .distance(0)
+                .strength(1 / _k)
+            )
+            .force("charge", d3.forceManyBody()
+                .strength(-(_k ** 2))
+                .distanceMax(width / 10)
+            )
+            .force("geoforce", GeoForce(jnodes)
+                .projection(_proj)
+                .strength(_K / _k)
+            )
+            // .force("center", d3.forceCenter(ow, oh))
+            // .force("x", d3.forceX())
+            // .force("y", d3.forceY())
+            .restart()
+            .tick(2000)
+
+        const svg = d3.select("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const link = svg.append("g")
+            .attr("stroke", "#ccc")
+            .attr("stroke-opacity", .5)
+            .attr("stroke-width", .5)
+            .selectAll("line")
+            .data(jedges)
+            .join("line");
+
+        const node = svg.append("g")
+            .attr("fill", "#fff")
+            .selectAll("circle")
+            .data(jnodes)
+            .join("circle")
+                .attr("fill", "#ccc")
+                .attr("r", 3.5);
+
+        node.append("title")
+            .text(d => `${d.name}, (${d.lng}, ${d.lat})`);
+
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+
+        node
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y);
+
+        console.log(`Edge Length Variation: ${ELVar(jedges)}`);
+        console.log(`Mean Geographical Offset: ${MeanGO(jnodes, _proj) / height}`);
+    });
+};
+
+function GeoForce(nodes) {
+    let fProj = (lng, lat) => [lng, lat];
+    let K = 1;
+
+    function force(alpha) {
+        for (let node of nodes) {
+            let [x, y] = fProj(node.lng, node.lat);
+            let dx = x - node.x;
+            let dy = y - node.y;
+            let l = Math.sqrt(dx * dx + dy * dy);   
+            node.vx += dx * K * alpha;
+            node.vy += dy * K * alpha;
+        }
+    }
+    force.projection = function(_) {
+        if (arguments.length && typeof _ === "function")
+            fProj = _;  
+        return force;
+    }
+    force.strength = function(_) {
+        if (arguments.length && typeof _ === "number")
+            K = _;
+        return force;
+    }
+
+    return force;
+}
+
+function ELVar(edges) {
+    let dists = edges.map(e => {
+        let {x, y} = e.source;
+        let dx = x - e.target.x;
+        let dy = y - e.target.y;
+        return Math.sqrt(dx*dx + dy*dy);
+    });
+    let n = dists.length;
+    let u = dists.reduce((a,b) => a + b) / n;
+    let sqvar = dists.map(d => (d - u)**2).reduce((a,b) => a + b) / (n * u*u);
+    let l_a = Math.sqrt(sqvar);
+    let M_l = l_a / Math.sqrt(n - 1);
+    return M_l;
+}
+
+function MeanGO(nodes, proj) {
+    let dists = nodes.map(n => {
+        let [x, y] = proj(n.lng, n.lat);
+        let dx = x - n.x;
+        let dy = y - n.y;
+        return Math.sqrt(dx*dx + dy*dy);
+    });
+    let n = dists.length;
+    let u = dists.reduce((a,b) => a + b) / n;
+    return u;
+}
+
+</script>
+</html>
