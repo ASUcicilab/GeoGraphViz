@@ -1,4 +1,4 @@
-## GeoGraphVis Experiments
+## GeoGraphViz - A Graph on the Map Visualization Algorithm
 
 There are two sets of datasets. 
 Dataset1 is the real-world data which represent a network of expertise with infectious disease related expertise. This expert network is used by a non-profit organization Direct Relief to search and locate expert in a disaster response scenario. 
@@ -20,5 +20,5 @@ In the CSV file name of simulated data, the number followed by "uw" indicates th
 
 The `exp.html` contains javascript code for loading the datasets for visualization. 
 
-The live GeoGraphVis interface can also be found through this link: [http://cici.lab.asu.edu/kwg/](http://cici.lab.asu.edu/kwg/)
+The live GeoGraphViz interface can also be found through this link: [http://cici.lab.asu.edu/kwg/](http://cici.lab.asu.edu/kwg/)
 
